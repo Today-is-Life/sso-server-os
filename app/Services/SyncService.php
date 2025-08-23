@@ -11,33 +11,33 @@ class SyncService
     /**
      * Sync user from SSO to local database
      */
-    public function syncUserToLocal($ssoUserId)
+    public function syncUserToLocal(string $ssoUserId): bool
     {
         try {
             // Get user from SSO database
             $ssoUser = User::on('sso')->find($ssoUserId);
-            
-            if (!$ssoUser) {
+
+            if (! $ssoUser) {
                 return false;
             }
-            
+
             // Find or create user in local database
             $localUser = DB::connection('mysql')->table('users')
                 ->where('id', $ssoUser->id)
                 ->first();
-            
+
             $userData = [
                 'id' => $ssoUser->id,
                 'name' => $ssoUser->name,
-                'email_hash' => $ssoUser->email_hash,
+                'email_hash' => $ssoUser->getAttribute('email_hash'),
                 'email_verified_at' => $ssoUser->email_verified_at,
-                'avatar_url' => $ssoUser->avatar_url,
-                'locale' => $ssoUser->locale,
-                'timezone' => $ssoUser->timezone,
+                'avatar_url' => $ssoUser->getAttribute('avatar_url'),
+                'locale' => $ssoUser->getAttribute('locale'),
+                'timezone' => $ssoUser->getAttribute('timezone'),
                 'updated_at' => now(),
             ];
-            
-            if (!$localUser) {
+
+            if (! $localUser) {
                 $userData['created_at'] = now();
                 DB::connection('mysql')->table('users')->insert($userData);
             } else {
@@ -45,40 +45,41 @@ class SyncService
                     ->where('id', $ssoUser->id)
                     ->update($userData);
             }
-            
+
             // Sync user groups for this domain
             $this->syncUserGroups($ssoUser);
-            
+
             return true;
-            
+
         } catch (\Exception $e) {
-            Log::error('User sync failed: ' . $e->getMessage());
+            Log::error('User sync failed: '.$e->getMessage());
+
             return false;
         }
     }
-    
+
     /**
      * Sync user groups for current domain
      */
-    public function syncUserGroups($ssoUser)
+    public function syncUserGroups(User $ssoUser): void
     {
         $currentDomainId = session('current_domain_id');
-        
-        if (!$currentDomainId) {
+
+        if (! $currentDomainId) {
             // Try to detect domain from URL
             $domain = DB::connection('sso')->table('domains')
-                ->where('url', 'LIKE', '%' . request()->getHost() . '%')
+                ->where('url', 'LIKE', '%'.request()->getHost().'%')
                 ->first();
-            
+
             if ($domain) {
-                $currentDomainId = $domain->id;
+                $currentDomainId = (string) $domain->id;
             }
         }
-        
-        if (!$currentDomainId) {
+
+        if (! $currentDomainId) {
             return;
         }
-        
+
         // Get user groups for this domain from SSO
         $userGroups = DB::connection('sso')->table('user_groups')
             ->join('groups', 'user_groups.group_id', '=', 'groups.id')
@@ -90,12 +91,12 @@ class SyncService
             })
             ->select('user_groups.*', 'groups.domain_id')
             ->get();
-        
+
         // Sync to local database
         DB::connection('mysql')->table('user_groups')
             ->where('user_id', $ssoUser->id)
             ->delete();
-        
+
         foreach ($userGroups as $userGroup) {
             DB::connection('mysql')->table('user_groups')->insert([
                 'user_id' => $userGroup->user_id,
@@ -107,25 +108,25 @@ class SyncService
             ]);
         }
     }
-    
+
     /**
      * Sync groups for a domain
      */
-    public function syncDomainGroups($domainId)
+    public function syncDomainGroups(string $domainId): void
     {
         // Get all groups for domain from SSO
         $groups = DB::connection('sso')->table('groups')
             ->where('domain_id', $domainId)
             ->get();
-        
+
         foreach ($groups as $group) {
             $localGroup = DB::connection('mysql')->table('groups')
                 ->where('id', $group->id)
                 ->first();
-            
+
             $groupData = (array) $group;
-            
-            if (!$localGroup) {
+
+            if (! $localGroup) {
                 DB::connection('mysql')->table('groups')->insert($groupData);
             } else {
                 unset($groupData['created_at']);
@@ -134,40 +135,40 @@ class SyncService
                     ->update($groupData);
             }
         }
-        
+
         // Sync permissions
         $this->syncPermissions();
-        
+
         // Sync group permissions
         $groupPermissions = DB::connection('sso')->table('group_permissions')
             ->whereIn('group_id', $groups->pluck('id'))
             ->get();
-        
+
         DB::connection('mysql')->table('group_permissions')
             ->whereIn('group_id', $groups->pluck('id'))
             ->delete();
-        
+
         foreach ($groupPermissions as $gp) {
             DB::connection('mysql')->table('group_permissions')
                 ->insert((array) $gp);
         }
     }
-    
+
     /**
      * Sync permissions
      */
-    public function syncPermissions()
+    public function syncPermissions(): void
     {
         $permissions = DB::connection('sso')->table('permissions')->get();
-        
+
         foreach ($permissions as $permission) {
             $localPerm = DB::connection('mysql')->table('permissions')
                 ->where('id', $permission->id)
                 ->first();
-            
+
             $permData = (array) $permission;
-            
-            if (!$localPerm) {
+
+            if (! $localPerm) {
                 DB::connection('mysql')->table('permissions')->insert($permData);
             } else {
                 unset($permData['created_at']);
@@ -177,49 +178,55 @@ class SyncService
             }
         }
     }
-    
+
     /**
      * Verify SSO token and sync user
      */
-    public function verifySSOTokenAndSync($token)
+    public function verifySSOTokenAndSync(string $token): ?User
     {
         // Verify JWT token
         try {
-            $publicKey = file_get_contents(storage_path('keys/oauth-public.key'));
-            $decoded = \Firebase\JWT\JWT::decode($token, new \Firebase\JWT\Key($publicKey, 'RS256'));
-            
+            $publicKeyContent = file_get_contents(storage_path('keys/oauth-public.key'));
+            if ($publicKeyContent === false) {
+                throw new \Exception('Failed to read public key');
+            }
+            $decoded = \Firebase\JWT\JWT::decode($token, new \Firebase\JWT\Key($publicKeyContent, 'RS256'));
+
             // Check if token is still valid
             if ($decoded->exp < time()) {
                 return null;
             }
-            
+
             // Sync user from SSO
             $this->syncUserToLocal($decoded->sub);
-            
+
             // Get local user
             $user = User::on('mysql')->find($decoded->sub);
-            
-            return $user;
-            
+
+            return $user instanceof User ? $user : null;
+
         } catch (\Exception $e) {
-            Log::error('Token verification failed: ' . $e->getMessage());
+            Log::error('Token verification failed: '.$e->getMessage());
+
             return null;
         }
     }
-    
+
     /**
      * Create webhook for real-time sync
+     *
+     * @param  array<string, mixed>  $data
      */
-    public function notifyDomainUpdate($event, $data)
+    public function notifyDomainUpdate(string $event, array $data): void
     {
         $domains = DB::connection('sso')->table('domains')
             ->where('is_active', true)
             ->get();
-        
+
         foreach ($domains as $domain) {
             if ($domain->webhook_url) {
                 try {
-                    $client = new \GuzzleHttp\Client();
+                    $client = new \GuzzleHttp\Client;
                     $client->post($domain->webhook_url, [
                         'json' => [
                             'event' => $event,
@@ -230,35 +237,43 @@ class SyncService
                         'timeout' => 5,
                     ]);
                 } catch (\Exception $e) {
-                    Log::warning("Webhook failed for domain {$domain->name}: " . $e->getMessage());
+                    Log::warning("Webhook failed for domain {$domain->name}: ".$e->getMessage());
                 }
             }
         }
     }
-    
+
     /**
      * Generate webhook signature
+     *
+     * @param  array<string, mixed>  $data
      */
-    private function generateWebhookSignature($event, $data, $secret)
+    private function generateWebhookSignature(string $event, array $data, string $secret): string
     {
         $payload = json_encode(['event' => $event, 'data' => $data]);
+        if ($payload === false) {
+            throw new \Exception('Failed to encode payload');
+        }
+
         return hash_hmac('sha256', $payload, $secret);
     }
-    
+
     /**
      * Sync user profile changes back to SSO
+     *
+     * @param  array<string, mixed>  $changes
      */
-    public function syncUserToSSO($localUserId, $changes)
+    public function syncUserToSSO(string $localUserId, array $changes): void
     {
         $allowedFields = ['name', 'avatar_url', 'locale', 'timezone', 'preferences'];
-        
+
         $updates = array_intersect_key($changes, array_flip($allowedFields));
-        
-        if (!empty($updates)) {
+
+        if (! empty($updates)) {
             DB::connection('sso')->table('users')
                 ->where('id', $localUserId)
                 ->update($updates);
-            
+
             // Notify other domains
             $this->notifyDomainUpdate('user.updated', [
                 'user_id' => $localUserId,

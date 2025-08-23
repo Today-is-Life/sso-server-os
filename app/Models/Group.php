@@ -6,7 +6,29 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Collection;
 
+/**
+ * @property string $id
+ * @property string $domain_id
+ * @property string|null $parent_id
+ * @property string $name
+ * @property string $slug
+ * @property string|null $description
+ * @property int $level
+ * @property string $path
+ * @property string|null $color
+ * @property string|null $icon
+ * @property int $sort_order
+ * @property bool $is_active
+ * @property int|null $max_users
+ * @property array<string, mixed>|null $metadata
+ * @property \Illuminate\Support\Carbon|null $created_at
+ * @property \Illuminate\Support\Carbon|null $updated_at
+ */
 class Group extends Model
 {
     use HasFactory, HasUuids;
@@ -16,11 +38,14 @@ class Group extends Model
      *
      * @var string
      */
-    protected $connection = 'sso';
+    // SSO server uses default connection
 
     /**
      * The attributes that are mass assignable.
      *
+     * @var array<string>
+     */
+    /**
      * @var array<string>
      */
     protected $fillable = [
@@ -55,7 +80,7 @@ class Group extends Model
     /**
      * Boot the model
      */
-    protected static function boot()
+    protected static function boot(): void
     {
         parent::boot();
 
@@ -90,7 +115,7 @@ class Group extends Model
     /**
      * Update hierarchy when parent changes
      */
-    public function updateHierarchy()
+    public function updateHierarchy(): void
     {
         if ($this->parent_id) {
             $parent = static::find($this->parent_id);
@@ -108,7 +133,7 @@ class Group extends Model
     /**
      * Update all descendant groups
      */
-    public function updateDescendants()
+    public function updateDescendants(): void
     {
         foreach ($this->children as $child) {
             $child->level = $this->level + 1;
@@ -121,7 +146,7 @@ class Group extends Model
     /**
      * Domain relationship
      */
-    public function domain()
+    public function domain(): BelongsTo
     {
         return $this->belongsTo(Domain::class);
     }
@@ -129,7 +154,7 @@ class Group extends Model
     /**
      * Parent group relationship
      */
-    public function parent()
+    public function parent(): BelongsTo
     {
         return $this->belongsTo(Group::class, 'parent_id');
     }
@@ -137,7 +162,7 @@ class Group extends Model
     /**
      * Children groups relationship
      */
-    public function children()
+    public function children(): HasMany
     {
         return $this->hasMany(Group::class, 'parent_id')->orderBy('sort_order');
     }
@@ -145,7 +170,7 @@ class Group extends Model
     /**
      * Get all descendants
      */
-    public function descendants()
+    public function descendants(): Collection
     {
         $descendants = collect();
         
@@ -160,7 +185,7 @@ class Group extends Model
     /**
      * Get all ancestors
      */
-    public function ancestors()
+    public function ancestors(): Collection
     {
         $ancestors = collect();
         $parent = $this->parent;
@@ -176,7 +201,7 @@ class Group extends Model
     /**
      * Get root group
      */
-    public function root()
+    public function root(): Group
     {
         $root = $this;
         
@@ -190,7 +215,7 @@ class Group extends Model
     /**
      * Check if group is root
      */
-    public function isRoot()
+    public function isRoot(): bool
     {
         return $this->parent_id === null;
     }
@@ -198,7 +223,7 @@ class Group extends Model
     /**
      * Check if group is leaf (no children)
      */
-    public function isLeaf()
+    public function isLeaf(): bool
     {
         return $this->children()->count() === 0;
     }
@@ -206,7 +231,7 @@ class Group extends Model
     /**
      * Check if group is ancestor of another group
      */
-    public function isAncestorOf(Group $group)
+    public function isAncestorOf(Group $group): bool
     {
         return $group->ancestors()->contains('id', $this->id);
     }
@@ -214,7 +239,7 @@ class Group extends Model
     /**
      * Check if group is descendant of another group
      */
-    public function isDescendantOf(Group $group)
+    public function isDescendantOf(Group $group): bool
     {
         return $this->ancestors()->contains('id', $group->id);
     }
@@ -222,7 +247,7 @@ class Group extends Model
     /**
      * Users relationship
      */
-    public function users()
+    public function users(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'user_groups')
             ->withPivot(['assigned_at', 'assigned_by', 'expires_at', 'is_primary'])
@@ -232,7 +257,7 @@ class Group extends Model
     /**
      * Get active users count
      */
-    public function getActiveUsersCountAttribute()
+    public function getActiveUsersCountAttribute(): int
     {
         return $this->users()->count();
     }
@@ -240,7 +265,7 @@ class Group extends Model
     /**
      * Check if group has space for more users
      */
-    public function hasSpace()
+    public function hasSpace(): bool
     {
         if (!$this->max_users) {
             return true;
@@ -252,7 +277,7 @@ class Group extends Model
     /**
      * Permissions relationship
      */
-    public function permissions()
+    public function permissions(): BelongsToMany
     {
         return $this->belongsToMany(Permission::class, 'group_permissions')
             ->withPivot(['granted_by', 'can_delegate', 'created_at']);
@@ -261,7 +286,7 @@ class Group extends Model
     /**
      * Get all permissions including inherited from parents
      */
-    public function getAllPermissions()
+    public function getAllPermissions(): Collection
     {
         $permissions = $this->permissions;
         
@@ -276,7 +301,7 @@ class Group extends Model
     /**
      * Check if group has specific permission
      */
-    public function hasPermission($permission)
+    public function hasPermission(string|Permission $permission): bool
     {
         if (is_string($permission)) {
             return $this->getAllPermissions()->contains('slug', $permission);
@@ -288,7 +313,7 @@ class Group extends Model
     /**
      * Grant permission to group
      */
-    public function grantPermission($permission, $grantedBy = null, $canDelegate = false)
+    public function grantPermission(string|Permission $permission, ?string $grantedBy = null, bool $canDelegate = false): bool
     {
         $permissionModel = is_string($permission) 
             ? Permission::where('slug', $permission)->first() 
@@ -310,7 +335,7 @@ class Group extends Model
     /**
      * Revoke permission from group
      */
-    public function revokePermission($permission)
+    public function revokePermission(string|Permission $permission): bool
     {
         $permissionModel = is_string($permission) 
             ? Permission::where('slug', $permission)->first() 
@@ -328,7 +353,7 @@ class Group extends Model
     /**
      * Add user to group
      */
-    public function addUser($user, $assignedBy = null, $isPrimary = false, $expiresAt = null)
+    public function addUser(User $user, ?string $assignedBy = null, bool $isPrimary = false, ?\Carbon\Carbon $expiresAt = null): bool
     {
         if (!$this->hasSpace()) {
             throw new \Exception('Group has reached maximum user limit');
@@ -347,7 +372,7 @@ class Group extends Model
     /**
      * Remove user from group
      */
-    public function removeUser($user)
+    public function removeUser(User $user): bool
     {
         $this->users()->detach($user->id);
         return true;
@@ -356,7 +381,7 @@ class Group extends Model
     /**
      * Get group hierarchy as tree
      */
-    public static function getTree($domainId)
+    public static function getTree(string $domainId): Collection
     {
         $groups = static::where('domain_id', $domainId)
             ->whereNull('parent_id')
@@ -372,7 +397,7 @@ class Group extends Model
     /**
      * Convert group to tree structure
      */
-    public function toTree()
+    public function toTree(): array
     {
         return [
             'id' => $this->id,
@@ -395,7 +420,7 @@ class Group extends Model
     /**
      * Move group to new parent
      */
-    public function moveTo($newParent = null)
+    public function moveTo(?Group $newParent = null): Group
     {
         $this->parent_id = $newParent ? $newParent->id : null;
         $this->updateHierarchy();
@@ -407,7 +432,7 @@ class Group extends Model
     /**
      * Reorder group
      */
-    public function reorder($position)
+    public function reorder(int $position): Group
     {
         $this->sort_order = $position;
         $this->save();

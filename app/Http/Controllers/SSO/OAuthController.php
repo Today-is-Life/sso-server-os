@@ -12,13 +12,16 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\View\View;
 
 class OAuthController extends Controller
 {
     /**
      * OAuth2 Authorization Endpoint
      */
-    public function authorize(Request $request)
+    public function authorize(Request $request): JsonResponse|RedirectResponse|View
     {
         $validated = $request->validate([
             'client_id' => 'required|string',
@@ -71,7 +74,7 @@ class OAuthController extends Controller
     /**
      * Approve authorization
      */
-    public function approveAuthorization(Request $request)
+    public function approveAuthorization(Request $request): JsonResponse|RedirectResponse
     {
         $validated = $request->validate([
             'client_id' => 'required|string',
@@ -110,7 +113,7 @@ class OAuthController extends Controller
     /**
      * Issue authorization code
      */
-    private function issueAuthorizationCode($domain, $request)
+    private function issueAuthorizationCode(Domain $domain, array $request): RedirectResponse
     {
         $code = Str::random(64);
         
@@ -139,7 +142,7 @@ class OAuthController extends Controller
     /**
      * OAuth2 Token Endpoint
      */
-    public function token(Request $request)
+    public function token(Request $request): JsonResponse
     {
         $grantType = $request->input('grant_type');
         
@@ -158,7 +161,7 @@ class OAuthController extends Controller
     /**
      * Handle authorization code grant
      */
-    private function handleAuthorizationCodeGrant(Request $request)
+    private function handleAuthorizationCodeGrant(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'code' => 'required|string',
@@ -216,7 +219,7 @@ class OAuthController extends Controller
     /**
      * Issue access and refresh tokens
      */
-    private function issueTokens($user, $domain, $scope)
+    private function issueTokens(User $user, Domain $domain, string $scope): JsonResponse
     {
         $tokenId = Str::uuid();
         $accessToken = $this->generateJWT($user, $domain, $scope, $tokenId);
@@ -256,7 +259,7 @@ class OAuthController extends Controller
     /**
      * Generate JWT access token
      */
-    private function generateJWT($user, $domain, $scope, $tokenId)
+    private function generateJWT(User $user, Domain $domain, string $scope, string $tokenId): string
     {
         $privateKey = $this->getPrivateKey();
         
@@ -278,7 +281,7 @@ class OAuthController extends Controller
     /**
      * Generate OpenID Connect ID Token
      */
-    private function generateIDToken($user, $domain)
+    private function generateIDToken(User $user, Domain $domain): string
     {
         $privateKey = $this->getPrivateKey();
         
@@ -291,10 +294,10 @@ class OAuthController extends Controller
             'auth_time' => session('auth_time', time()),
             'nonce' => session('oidc_nonce'),
             'email' => $user->email,
-            'email_verified' => $user->email_verified_at !== null,
+            'email_verified' => $user->getAttribute('email_verified_at') !== null,
             'name' => $user->name,
             'preferred_username' => $user->email,
-            'locale' => $user->locale,
+            'locale' => $user->getAttribute('locale'),
         ];
         
         return JWT::encode($payload, $privateKey, 'RS256', 'sso-key-1');
@@ -303,7 +306,7 @@ class OAuthController extends Controller
     /**
      * Get user info endpoint
      */
-    public function userinfo(Request $request)
+    public function userinfo(Request $request): JsonResponse
     {
         $user = $request->user();
         
@@ -311,8 +314,8 @@ class OAuthController extends Controller
             'sub' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
-            'email_verified' => $user->email_verified_at !== null,
-            'locale' => $user->locale,
+            'email_verified' => $user->getAttribute('email_verified_at') !== null,
+            'locale' => $user->getAttribute('locale'),
             'preferred_username' => $user->email,
             'updated_at' => $user->updated_at->timestamp,
         ]);
@@ -321,7 +324,7 @@ class OAuthController extends Controller
     /**
      * OpenID Connect Discovery
      */
-    public function discovery()
+    public function discovery(): JsonResponse
     {
         return response()->json([
             'issuer' => url('/'),
@@ -342,7 +345,7 @@ class OAuthController extends Controller
     /**
      * JWKS endpoint
      */
-    public function jwks()
+    public function jwks(): JsonResponse
     {
         $publicKey = $this->getPublicKey();
         
@@ -367,7 +370,7 @@ class OAuthController extends Controller
     /**
      * Get private key for JWT signing
      */
-    private function getPrivateKey()
+    private function getPrivateKey(): string
     {
         $keyPath = storage_path('keys/oauth-private.key');
         
@@ -376,13 +379,17 @@ class OAuthController extends Controller
             $this->generateKeyPair();
         }
         
-        return file_get_contents($keyPath);
+        $content = file_get_contents($keyPath);
+        if ($content === false) {
+            throw new \Exception('Failed to read private key');
+        }
+        return $content;
     }
     
     /**
      * Get public key for JWT verification
      */
-    private function getPublicKey()
+    private function getPublicKey(): string
     {
         $keyPath = storage_path('keys/oauth-public.key');
         
@@ -390,13 +397,17 @@ class OAuthController extends Controller
             $this->generateKeyPair();
         }
         
-        return file_get_contents($keyPath);
+        $content = file_get_contents($keyPath);
+        if ($content === false) {
+            throw new \Exception('Failed to read public key');
+        }
+        return $content;
     }
     
     /**
      * Generate RSA key pair
      */
-    private function generateKeyPair()
+    private function generateKeyPair(): void
     {
         $config = [
             'private_key_bits' => 4096,

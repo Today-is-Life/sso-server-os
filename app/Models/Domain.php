@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Domain extends Model
 {
@@ -17,7 +18,7 @@ class Domain extends Model
      *
      * @var string
      */
-    protected $connection = 'sso';
+    // SSO server uses default connection
 
     /**
      * The attributes that are mass assignable.
@@ -65,7 +66,7 @@ class Domain extends Model
     /**
      * Boot the model
      */
-    protected static function boot()
+    protected static function boot(): void
     {
         parent::boot();
 
@@ -82,7 +83,7 @@ class Domain extends Model
     /**
      * Get decrypted client secret
      */
-    public function getClientSecretAttribute($value)
+    public function getClientSecretAttribute(?string $value): ?string
     {
         return $value ? Crypt::decryptString($value) : null;
     }
@@ -90,7 +91,7 @@ class Domain extends Model
     /**
      * Set encrypted client secret
      */
-    public function setClientSecretAttribute($value)
+    public function setClientSecretAttribute(?string $value): void
     {
         $this->attributes['client_secret'] = $value ? Crypt::encryptString($value) : null;
     }
@@ -98,7 +99,7 @@ class Domain extends Model
     /**
      * Groups relationship
      */
-    public function groups()
+    public function groups(): HasMany
     {
         return $this->hasMany(Group::class)->orderBy('sort_order');
     }
@@ -106,7 +107,7 @@ class Domain extends Model
     /**
      * Root groups (no parent)
      */
-    public function rootGroups()
+    public function rootGroups(): HasMany
     {
         return $this->hasMany(Group::class)->whereNull('parent_id')->orderBy('sort_order');
     }
@@ -114,7 +115,7 @@ class Domain extends Model
     /**
      * Sessions relationship
      */
-    public function sessions()
+    public function sessions(): HasMany
     {
         return $this->hasMany(UserSession::class);
     }
@@ -122,7 +123,7 @@ class Domain extends Model
     /**
      * Audit logs relationship
      */
-    public function auditLogs()
+    public function auditLogs(): HasMany
     {
         return $this->hasMany(AuditLog::class);
     }
@@ -130,7 +131,7 @@ class Domain extends Model
     /**
      * Magic links relationship
      */
-    public function magicLinks()
+    public function magicLinks(): HasMany
     {
         return $this->hasMany(MagicLink::class);
     }
@@ -138,7 +139,7 @@ class Domain extends Model
     /**
      * Check if origin is allowed
      */
-    public function isOriginAllowed($origin)
+    public function isOriginAllowed(string $origin): bool
     {
         if (!$this->allowed_origins || empty($this->allowed_origins)) {
             return false;
@@ -164,7 +165,7 @@ class Domain extends Model
     /**
      * Check if redirect URI is allowed
      */
-    public function isRedirectUriAllowed($uri)
+    public function isRedirectUriAllowed(string $uri): bool
     {
         if (!$this->redirect_uris || empty($this->redirect_uris)) {
             return false;
@@ -176,7 +177,7 @@ class Domain extends Model
     /**
      * Generate new client credentials
      */
-    public function regenerateCredentials()
+    public function regenerateCredentials(): array
     {
         $this->client_id = 'dom_' . Str::random(32);
         $this->client_secret = Str::random(64);
@@ -191,7 +192,7 @@ class Domain extends Model
     /**
      * Get domain statistics
      */
-    public function getStatistics()
+    public function getStatistics(): array
     {
         return [
             'total_groups' => $this->groups()->count(),

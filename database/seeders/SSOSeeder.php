@@ -6,6 +6,7 @@ use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Crypt;
 
 class SSOSeeder extends Seeder
 {
@@ -16,7 +17,7 @@ class SSOSeeder extends Seeder
     {
         // Create test domain
         $domainId = Str::uuid();
-        DB::connection('sso')->table('domains')->insert([
+        DB::table('domains')->insert([
             'id' => $domainId,
             'name' => 'todayislife',
             'display_name' => 'Today Is Life',
@@ -47,7 +48,7 @@ class SSOSeeder extends Seeder
         $userGroupId = Str::uuid();
 
         // Superadmin Group - System-wide
-        DB::connection('sso')->table('groups')->insert([
+        DB::table('groups')->insert([
             'id' => $superadminGroupId,
             'domain_id' => $domainId,
             'parent_id' => null,
@@ -67,7 +68,7 @@ class SSOSeeder extends Seeder
         ]);
 
         // Admin Group - Domain-specific
-        DB::connection('sso')->table('groups')->insert([
+        DB::table('groups')->insert([
             'id' => $adminGroupId,
             'domain_id' => $domainId,
             'parent_id' => null,
@@ -87,7 +88,7 @@ class SSOSeeder extends Seeder
         ]);
 
         // User Group - Basic users
-        DB::connection('sso')->table('groups')->insert([
+        DB::table('groups')->insert([
             'id' => $userGroupId,
             'domain_id' => $domainId,
             'parent_id' => null,
@@ -129,20 +130,20 @@ class SSOSeeder extends Seeder
             $permission['metadata'] = json_encode(['scope' => $permission['is_system'] ? 'global' : 'domain']);
             $permission['created_at'] = now();
             $permission['updated_at'] = now();
-            DB::connection('sso')->table('permissions')->insert($permission);
+            DB::table('permissions')->insert($permission);
         }
 
         // Get permission IDs
-        $systemManageId = DB::connection('sso')->table('permissions')->where('slug', 'system.manage')->value('id');
-        $domainsManageId = DB::connection('sso')->table('permissions')->where('slug', 'domains.manage')->value('id');
-        $usersManageGlobalId = DB::connection('sso')->table('permissions')->where('slug', 'users.manage.global')->value('id');
-        $groupsManageGlobalId = DB::connection('sso')->table('permissions')->where('slug', 'groups.manage.global')->value('id');
-        $usersManageId = DB::connection('sso')->table('permissions')->where('slug', 'users.manage')->value('id');
-        $groupsManageId = DB::connection('sso')->table('permissions')->where('slug', 'groups.manage')->value('id');
-        $contentManageId = DB::connection('sso')->table('permissions')->where('slug', 'content.manage')->value('id');
-        $settingsManageId = DB::connection('sso')->table('permissions')->where('slug', 'settings.manage')->value('id');
-        $pagesViewId = DB::connection('sso')->table('permissions')->where('slug', 'pages.view')->value('id');
-        $profileManageId = DB::connection('sso')->table('permissions')->where('slug', 'profile.manage')->value('id');
+        $systemManageId = DB::table('permissions')->where('slug', 'system.manage')->value('id');
+        $domainsManageId = DB::table('permissions')->where('slug', 'domains.manage')->value('id');
+        $usersManageGlobalId = DB::table('permissions')->where('slug', 'users.manage.global')->value('id');
+        $groupsManageGlobalId = DB::table('permissions')->where('slug', 'groups.manage.global')->value('id');
+        $usersManageId = DB::table('permissions')->where('slug', 'users.manage')->value('id');
+        $groupsManageId = DB::table('permissions')->where('slug', 'groups.manage')->value('id');
+        $contentManageId = DB::table('permissions')->where('slug', 'content.manage')->value('id');
+        $settingsManageId = DB::table('permissions')->where('slug', 'settings.manage')->value('id');
+        $pagesViewId = DB::table('permissions')->where('slug', 'pages.view')->value('id');
+        $profileManageId = DB::table('permissions')->where('slug', 'profile.manage')->value('id');
 
         // Assign permissions to groups
         // Superadmin gets all permissions
@@ -153,7 +154,7 @@ class SSOSeeder extends Seeder
         ];
         
         foreach ($allPermissions as $permissionId) {
-            DB::connection('sso')->table('group_permissions')->insert([
+            DB::table('group_permissions')->insert([
                 'group_id' => $superadminGroupId,
                 'permission_id' => $permissionId,
                 'granted_by' => null,
@@ -169,7 +170,7 @@ class SSOSeeder extends Seeder
         ];
         
         foreach ($adminPermissions as $permissionId) {
-            DB::connection('sso')->table('group_permissions')->insert([
+            DB::table('group_permissions')->insert([
                 'group_id' => $adminGroupId,
                 'permission_id' => $permissionId,
                 'granted_by' => null,
@@ -182,7 +183,7 @@ class SSOSeeder extends Seeder
         $userPermissions = [$pagesViewId, $profileManageId];
         
         foreach ($userPermissions as $permissionId) {
-            DB::connection('sso')->table('group_permissions')->insert([
+            DB::table('group_permissions')->insert([
                 'group_id' => $userGroupId,
                 'permission_id' => $permissionId,
                 'granted_by' => null,
@@ -196,13 +197,13 @@ class SSOSeeder extends Seeder
         $adminUserId = Str::uuid();
         $userId = Str::uuid();
 
-        // Superadmin user
-        DB::connection('sso')->table('users')->insert([
+        // Superadmin user - with email verified!
+        DB::table('users')->insert([
             'id' => $superadminUserId,
             'name' => 'Super Admin',
-            'email' => 'superadmin@todayislife.test', // Will be encrypted by model
+            'email' => Crypt::encryptString('superadmin@todayislife.test'),
             'email_hash' => hash('sha256', strtolower('superadmin@todayislife.test')),
-            'email_verified_at' => now(),
+            'email_verified_at' => now(), // WICHTIG: E-Mail ist verifiziert!
             'password' => Hash::make('password'),
             'phone' => null,
             'phone_hash' => null,
@@ -224,13 +225,13 @@ class SSOSeeder extends Seeder
             'deleted_at' => null,
         ]);
 
-        // Admin user
-        DB::connection('sso')->table('users')->insert([
+        // Admin user - with email verified!
+        DB::table('users')->insert([
             'id' => $adminUserId,
             'name' => 'Admin User',
-            'email' => 'admin@todayislife.test', // Will be encrypted by model
+            'email' => Crypt::encryptString('admin@todayislife.test'),
             'email_hash' => hash('sha256', strtolower('admin@todayislife.test')),
-            'email_verified_at' => now(),
+            'email_verified_at' => now(), // WICHTIG: E-Mail ist verifiziert!
             'password' => Hash::make('password'),
             'phone' => null,
             'phone_hash' => null,
@@ -252,13 +253,13 @@ class SSOSeeder extends Seeder
             'deleted_at' => null,
         ]);
 
-        // Regular user
-        DB::connection('sso')->table('users')->insert([
+        // Regular user - with email verified!
+        DB::table('users')->insert([
             'id' => $userId,
             'name' => 'Test User',
-            'email' => 'user@todayislife.test', // Will be encrypted by model
+            'email' => Crypt::encryptString('user@todayislife.test'),
             'email_hash' => hash('sha256', strtolower('user@todayislife.test')),
-            'email_verified_at' => now(),
+            'email_verified_at' => now(), // WICHTIG: E-Mail ist verifiziert!
             'password' => Hash::make('password'),
             'phone' => null,
             'phone_hash' => null,
@@ -281,7 +282,7 @@ class SSOSeeder extends Seeder
         ]);
 
         // Assign users to groups
-        DB::connection('sso')->table('user_groups')->insert([
+        DB::table('user_groups')->insert([
             'user_id' => $superadminUserId,
             'group_id' => $superadminGroupId,
             'assigned_at' => now(),
@@ -290,7 +291,7 @@ class SSOSeeder extends Seeder
             'is_primary' => true,
         ]);
 
-        DB::connection('sso')->table('user_groups')->insert([
+        DB::table('user_groups')->insert([
             'user_id' => $adminUserId,
             'group_id' => $adminGroupId,
             'assigned_at' => now(),
@@ -299,7 +300,7 @@ class SSOSeeder extends Seeder
             'is_primary' => true,
         ]);
 
-        DB::connection('sso')->table('user_groups')->insert([
+        DB::table('user_groups')->insert([
             'user_id' => $userId,
             'group_id' => $userGroupId,
             'assigned_at' => now(),
@@ -309,7 +310,7 @@ class SSOSeeder extends Seeder
         ]);
 
         // Create OAuth client for the domain
-        DB::connection('sso')->table('oauth_clients')->insert([
+        DB::table('oauth_clients')->insert([
             'id' => Str::uuid(),
             'user_id' => null, // System client, not user-specific
             'name' => 'Today Is Life Web App',

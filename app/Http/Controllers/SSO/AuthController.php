@@ -13,10 +13,13 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\View\View;
+use Illuminate\Http\Response;
 
 class AuthController extends Controller
 {
-    protected $syncService;
+    protected SyncService $syncService;
 
     public function __construct(SyncService $syncService)
     {
@@ -26,7 +29,7 @@ class AuthController extends Controller
     /**
      * Show login form
      */
-    public function showLoginForm(Request $request)
+    public function showLoginForm(Request $request): View|RedirectResponse
     {
         $client_id = $request->get('client_id');
         $redirect_uri = $request->get('redirect_uri');
@@ -34,7 +37,7 @@ class AuthController extends Controller
         
         // Validate OAuth parameters if present
         if ($client_id) {
-            $domain = Domain::on('sso')->where('client_id', $client_id)->first();
+            $domain = Domain::where('client_id', $client_id)->first();
             if (!$domain || !$domain->is_active) {
                 return view('sso.error', ['message' => 'Invalid client']);
             }
@@ -46,7 +49,7 @@ class AuthController extends Controller
     /**
      * Handle login request
      */
-    public function login(Request $request)
+    public function login(Request $request): RedirectResponse
     {
         $validator = Validator::make($request->all(), [
             'email' => 'required|email',
@@ -63,26 +66,28 @@ class AuthController extends Controller
 
         // Find user by email hash
         $emailHash = hash('sha256', strtolower($request->email));
-        $user = User::on('sso')->where('email_hash', $emailHash)->first();
+        $user = User::where('email_hash', $emailHash)->first();
 
         if (!$user) {
             return back()->withErrors(['email' => 'Diese Zugangsdaten stimmen nicht mit unseren Aufzeichnungen überein.'])->withInput();
         }
 
         // Check if account is locked
-        if ($user->locked_until && $user->locked_until->isFuture()) {
-            $minutes = $user->locked_until->diffInMinutes(now());
+        $lockedUntil = $user->getAttribute('locked_until');
+        if ($lockedUntil && $lockedUntil->isFuture()) {
+            $minutes = $lockedUntil->diffInMinutes(now());
             return back()->withErrors(['email' => "Konto gesperrt. Bitte versuchen Sie es in {$minutes} Minuten erneut."])->withInput();
         }
 
         // Verify password
         if (!Hash::check($request->password, $user->password)) {
             // Increment failed login attempts
-            $user->failed_login_attempts++;
+            $failedAttempts = ($user->getAttribute('failed_login_attempts') ?? 0) + 1;
+            $user->setAttribute('failed_login_attempts', $failedAttempts);
             
             // Lock account after 5 failed attempts
-            if ($user->failed_login_attempts >= 5) {
-                $user->locked_until = now()->addMinutes(15);
+            if ($failedAttempts >= 5) {
+                $user->setAttribute('locked_until', now()->addMinutes(15));
                 $user->save();
                 return back()->withErrors(['email' => 'Zu viele fehlgeschlagene Anmeldeversuche. Konto für 15 Minuten gesperrt.'])->withInput();
             }
@@ -91,8 +96,9 @@ class AuthController extends Controller
             return back()->withErrors(['email' => 'Diese Zugangsdaten stimmen nicht mit unseren Aufzeichnungen überein.'])->withInput();
         }
 
-        // Check if email is verified
-        if (!$user->email_verified_at) {
+        // Check if email is verified (Superadmins bypass this check)
+        $isSuperadmin = $user->groups()->where('slug', 'superadmin')->exists();
+        if (!$user->email_verified_at && !$isSuperadmin) {
             return back()->withErrors(['email' => 'Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse.'])->withInput();
         }
 
@@ -105,20 +111,41 @@ class AuthController extends Controller
         }
 
         // Login successful
-        $this->completeLogin($user, $request->remember);
+        $this->completeLogin($user, $request->boolean('remember'));
+
+        // Check if user is superadmin
+        $isSuperadmin = $user->groups()
+            ->where('slug', 'superadmin')
+            ->exists();
 
         // Handle OAuth redirect
         if ($request->client_id) {
+            // If superadmin is logging in via another domain, redirect to SSO admin
+            if ($isSuperadmin) {
+                // Store the original client request in session for later redirect
+                session(['superadmin_return_client' => [
+                    'client_id' => $request->client_id,
+                    'redirect_uri' => $request->redirect_uri,
+                    'state' => $request->state,
+                ]]);
+                return redirect('https://sso.todayislife.test/admin');
+            }
             return $this->handleOAuthRedirect($user, $request);
         }
 
-        return redirect()->intended('/dashboard');
+        // Direct login to SSO - redirect based on user type
+        if ($isSuperadmin) {
+            return redirect('/admin'); // SSO admin for superadmins
+        }
+
+        // For regular users/admins, redirect to intended or their domain
+        return redirect()->intended('/admin');
     }
 
     /**
      * Complete login process
      */
-    protected function completeLogin($user, $remember = false)
+    protected function completeLogin(User $user, bool $remember = false): void
     {
         // Reset failed login attempts
         $user->failed_login_attempts = 0;
@@ -128,15 +155,17 @@ class AuthController extends Controller
         $user->save();
 
         // Login user
-        Auth::guard('sso')->login($user, $remember);
+        Auth::login($user, $remember);
 
         // Create session
-        DB::connection('sso')->table('user_sessions')->insert([
+        $token = Str::random(60);
+        DB::table('user_sessions')->insert([
             'id' => Str::uuid(),
             'user_id' => $user->id,
-            'token' => Str::random(60),
+            'token_hash' => hash('sha256', $token),
             'ip_address' => request()->ip(),
             'user_agent' => request()->userAgent(),
+            'last_activity' => now(),
             'expires_at' => now()->addMinutes(config('session.lifetime', 120)),
             'created_at' => now(),
             'updated_at' => now(),
@@ -146,12 +175,12 @@ class AuthController extends Controller
     /**
      * Handle OAuth redirect after successful login
      */
-    protected function handleOAuthRedirect($user, Request $request)
+    protected function handleOAuthRedirect(User $user, Request $request): RedirectResponse
     {
         // Generate authorization code
         $code = Str::random(40);
         
-        DB::connection('sso')->table('oauth_authorization_codes')->insert([
+        DB::table('oauth_authorization_codes')->insert([
             'id' => Str::uuid(),
             'client_id' => $request->client_id,
             'user_id' => $user->id,
@@ -174,7 +203,7 @@ class AuthController extends Controller
     /**
      * Show registration form
      */
-    public function showRegistrationForm(Request $request)
+    public function showRegistrationForm(Request $request): View
     {
         $client_id = $request->get('client_id');
         $redirect_uri = $request->get('redirect_uri');
@@ -182,7 +211,7 @@ class AuthController extends Controller
         
         // Check if registration is allowed
         if ($client_id) {
-            $domain = Domain::on('sso')->where('client_id', $client_id)->first();
+            $domain = Domain::where('client_id', $client_id)->first();
             if (!$domain || !$domain->is_active) {
                 return view('sso.error', ['message' => 'Invalid client']);
             }
@@ -199,7 +228,7 @@ class AuthController extends Controller
     /**
      * Handle registration request
      */
-    public function register(Request $request)
+    public function register(Request $request): RedirectResponse
     {
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
@@ -217,7 +246,7 @@ class AuthController extends Controller
 
         // Check if email already exists
         $emailHash = hash('sha256', strtolower($request->email));
-        if (User::on('sso')->where('email_hash', $emailHash)->exists()) {
+        if (User::where('email_hash', $emailHash)->exists()) {
             return back()->withErrors(['email' => 'Diese E-Mail-Adresse ist bereits registriert.'])->withInput();
         }
 
@@ -226,11 +255,11 @@ class AuthController extends Controller
         $defaultGroupId = null;
         
         if ($request->client_id) {
-            $domain = Domain::on('sso')->where('client_id', $request->client_id)->first();
+            $domain = Domain::where('client_id', $request->client_id)->first();
             if ($domain) {
                 $domainId = $domain->id;
                 // Find default user group for this domain
-                $defaultGroup = DB::connection('sso')->table('groups')
+                $defaultGroup = DB::table('groups')
                     ->where('domain_id', $domainId)
                     ->where('slug', 'user')
                     ->first();
@@ -242,19 +271,18 @@ class AuthController extends Controller
 
         // Create user
         $user = new User();
-        $user->setConnection('sso');
-        $user->id = Str::uuid();
+        $user->id = (string) Str::uuid();
         $user->name = $request->name;
         $user->email = $request->email; // Will be encrypted by mutator
-        $user->email_hash = $emailHash;
+        $user->setAttribute('email_hash', $emailHash);
         $user->password = Hash::make($request->password);
-        $user->locale = 'de';
-        $user->timezone = 'Europe/Berlin';
+        $user->setAttribute('locale', 'de');
+        $user->setAttribute('timezone', 'Europe/Berlin');
         $user->save();
 
         // Assign to default group if available
         if ($defaultGroupId) {
-            DB::connection('sso')->table('user_groups')->insert([
+            DB::table('user_groups')->insert([
                 'user_id' => $user->id,
                 'group_id' => $defaultGroupId,
                 'assigned_at' => now(),
@@ -274,11 +302,11 @@ class AuthController extends Controller
     /**
      * Send verification email
      */
-    protected function sendVerificationEmail($user)
+    protected function sendVerificationEmail(User $user): void
     {
         $token = Str::random(60);
         
-        DB::connection('sso')->table('password_reset_tokens')->insert([
+        DB::table('password_reset_tokens')->insert([
             'email' => $user->email_hash,
             'token' => Hash::make($token),
             'created_at' => now(),
@@ -291,18 +319,18 @@ class AuthController extends Controller
     /**
      * Logout
      */
-    public function logout(Request $request)
+    public function logout(Request $request): RedirectResponse
     {
-        $user = Auth::guard('sso')->user();
+        $user = Auth::user();
         
         if ($user) {
             // Delete user sessions
-            DB::connection('sso')->table('user_sessions')
+            DB::table('user_sessions')
                 ->where('user_id', $user->id)
                 ->delete();
         }
 
-        Auth::guard('sso')->logout();
+        Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 

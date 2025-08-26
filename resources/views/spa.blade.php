@@ -6,12 +6,7 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>TIL SSO Admin</title>
     
-    <!-- Alpine.js -->
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    
-    <!-- HTMX -->
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <script src="https://unpkg.com/htmx.org/dist/ext/json-enc.js"></script>
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
     
     <!-- SortableJS für Drag & Drop -->
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
@@ -319,125 +314,18 @@
     </style>
 </head>
 <body>
-    <div class="app-container" x-data="ssoApp()">
-        <!-- Sidebar -->
-        <aside class="sidebar">
-            <div style="padding: 1rem 0; margin-bottom: 1rem; border-bottom: 1px solid var(--border);">
-                <h2 style="font-size: 1.5rem; color: var(--primary);">SSO Admin</h2>
-            </div>
-            
-            <nav>
-                <a class="nav-item" 
-                   :class="{ active: currentView === 'dashboard' }"
-                   @click="navigate('dashboard')"
-                   hx-get="/admin/dashboard"
-                   hx-target="#main-content"
-                   hx-push-url="true">
-                    📊 Dashboard
-                </a>
-                
-                <a class="nav-item"
-                   :class="{ active: currentView === 'users' }"
-                   @click="navigate('users')"
-                   hx-get="/admin/users"
-                   hx-target="#main-content"
-                   hx-push-url="true">
-                    👥 Benutzer
-                </a>
-                
-                <a class="nav-item"
-                   :class="{ active: currentView === 'groups' }"
-                   @click="navigate('groups')"
-                   hx-get="/admin/groups"
-                   hx-target="#main-content"
-                   hx-push-url="true">
-                    🏢 Gruppen
-                </a>
-                
-                <a class="nav-item"
-                   :class="{ active: currentView === 'domains' }"
-                   @click="navigate('domains')"
-                   hx-get="/admin/domains"
-                   hx-target="#main-content"
-                   hx-push-url="true">
-                    🌐 Domains
-                </a>
-                
-                <a class="nav-item"
-                   :class="{ active: currentView === 'permissions' }"
-                   @click="navigate('permissions')"
-                   hx-get="/admin/permissions"
-                   hx-target="#main-content"
-                   hx-push-url="true">
-                    🔐 Berechtigungen
-                </a>
-            </nav>
-            
-            <div style="margin-top: auto; padding-top: 1rem;">
-                <div style="padding: 1rem; background: var(--light); border-radius: 0.5rem;">
-                    <div style="font-weight: 600;">{{ Auth::user()->name ?? 'Nicht angemeldet' }}</div>
-                    <div style="font-size: 0.75rem; color: #718096;">{{ Auth::user()->email ?? '' }}</div>
-                    <form action="/auth/logout" method="POST" style="margin-top: 0.5rem;">
-                        @csrf
-                        <button type="submit" class="btn btn-sm btn-secondary" style="width: 100%;">Logout</button>
-                    </form>
-                </div>
-            </div>
-        </aside>
-        
-        <!-- Main Content -->
-        <main class="main-content" id="main-content">
-            <!-- Content will be loaded here via HTMX -->
-            <div hx-get="/admin/dashboard" hx-trigger="load"></div>
-        </main>
+    <!-- Vue.js SSO Admin App -->
+    <div id="vue-app" class="app-container">
+        <sso-admin-app></sso-admin-app>
     </div>
     
     <script>
-        // Alpine.js App
-        function ssoApp() {
-            return {
-                currentView: 'dashboard',
-                
-                navigate(view) {
-                    this.currentView = view;
-                },
-                
-                confirmDelete(message = 'Wirklich löschen?') {
-                    return confirm(message);
-                }
-            }
-        }
-        
-        // HTMX Configuration
-        document.body.addEventListener('htmx:configRequest', (event) => {
-            event.detail.headers['X-CSRF-TOKEN'] = document.querySelector('meta[name="csrf-token"]').content;
-        });
-        
-        // Initialize drag & drop for groups
-        document.addEventListener('htmx:afterSwap', (event) => {
-            const groupTrees = document.querySelectorAll('.group-tree');
-            groupTrees.forEach(tree => {
-                new Sortable(tree, {
-                    group: 'groups',
-                    animation: 150,
-                    ghostClass: 'dragging',
-                    onEnd: function(evt) {
-                        // Send update to server
-                        fetch(`/api/admin/groups/${evt.item.dataset.groupId}/move`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                            },
-                            body: JSON.stringify({
-                                parent_id: evt.to.dataset.parentId,
-                                sort_order: evt.newIndex
-                            })
-                        });
-                    }
-                });
-            });
-        });
+        // Vue.js will handle all the functionality now
+        window.csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+        window.currentUser = {
+            name: '{{ Auth::user()->name ?? "" }}',
+            email: '{{ Auth::user()->email ?? "" }}'
+        };
     </script>
 </body>
 </html>

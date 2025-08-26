@@ -1,0 +1,125 @@
+name: Security Test Suite
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run daily at 2 AM
+    - cron: '0 2 * * *'
+
+jobs:
+  security-tests:
+    runs-on: ubuntu-latest
+    
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: sso_test
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, dom, filter, gd, json, hash, zip
+        coverage: xdebug
+
+    - name: Copy .env
+      run: |
+        cp .env.example .env
+        sed -i 's/DB_CONNECTION=.*/DB_CONNECTION=mysql/' .env
+        sed -i 's/DB_HOST=.*/DB_HOST=127.0.0.1/' .env
+        sed -i 's/DB_DATABASE=.*/DB_DATABASE=sso_test/' .env
+        sed -i 's/DB_USERNAME=.*/DB_USERNAME=root/' .env
+        sed -i 's/DB_PASSWORD=.*/DB_PASSWORD=password/' .env
+
+    - name: Install Dependencies
+      run: composer install -q --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
+
+    - name: Generate keys
+      run: |
+        php artisan key:generate
+        mkdir -p storage/keys
+        openssl genrsa -out storage/keys/oauth-private.key 2048
+        openssl rsa -in storage/keys/oauth-private.key -pubout -out storage/keys/oauth-public.key
+
+    - name: Run migrations
+      run: php artisan migrate --force
+
+    - name: Run Unit Tests
+      run: php artisan test --testsuite=Feature --filter=Security
+
+    - name: Run Security Test Suite
+      run: php artisan security:test --full --report
+
+    - name: PHPStan Analysis
+      run: vendor/bin/phpstan analyse --level=7 --memory-limit=512M
+
+    - name: Upload Security Report
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-report
+        path: storage/app/security-report-*.html
+
+    - name: Check Security Score
+      run: |
+        SCORE=$(php artisan security:test --quick | grep "Results:" | awk '{print $2}')
+        if [ "$SCORE" -lt "80" ]; then
+          echo "❌ Security score too low: $SCORE%"
+          exit 1
+        fi
+        echo "✅ Security score: $SCORE%"
+
+  dependency-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Run Composer Audit
+      run: composer audit
+
+    - name: OWASP Dependency Check
+      uses: dependency-check/Dependency-Check_Action@main
+      with:
+        project: 'SSO-Server'
+        path: '.'
+        format: 'HTML'
+        
+    - name: Upload OWASP report
+      uses: actions/upload-artifact@v3
+      with:
+        name: dependency-check-report
+        path: reports/
+
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+    
+    - name: Install Dependencies
+      run: composer install -q --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
+    
+    - name: Run Pint (PSR-12)
+      run: vendor/bin/pint --test
+    
+    - name: Security Headers Check
+      run: |
+        echo "Checking security headers..."
+        grep -r "X-Frame-Options" app/ || echo "⚠️ Missing X-Frame-Options"
+        grep -r "Content-Security-Policy" app/ || echo "⚠️ Missing CSP"
+        grep -r "X-Content-Type-Options" app/ || echo "⚠️ Missing X-Content-Type-Options"

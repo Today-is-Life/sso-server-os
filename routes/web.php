@@ -8,7 +8,7 @@ use App\Http\Controllers\Admin\AdminController;
 
 // Public routes
 Route::get('/', function () {
-    return view('welcome');
+    return view('sso-welcome');
 });
 
 // Laravel Auth Route (required for auth middleware)

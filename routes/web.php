@@ -27,7 +27,7 @@ Route::get('/test-auth', function() {
 });
 
 // SSO Authentication Routes
-Route::prefix('auth')->name('sso.')->group(function () {
+Route::prefix('auth')->name('sso.')->middleware(['auth-rate-limit'])->group(function () {
     // Login/Register
     Route::get('/login', [AuthController::class, 'showLoginForm'])->name('login');
     Route::post('/login', [AuthController::class, 'login'])->name('login.post');
@@ -53,7 +53,7 @@ Route::prefix('auth')->name('sso.')->group(function () {
 });
 
 // OAuth2/OIDC Routes
-Route::prefix('oauth')->name('oauth.')->group(function () {
+Route::prefix('oauth')->name('oauth.')->middleware(['oauth-rate-limit'])->group(function () {
     // Authorization
     Route::get('/authorize', [OAuthController::class, 'authorize'])->name('authorize');
     Route::post('/authorize', [OAuthController::class, 'handleAuthorization'])->name('authorize.handle');
@@ -107,7 +107,7 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
 });
 
 // 2FA Routes
-Route::middleware(['auth'])->prefix('2fa')->name('2fa.')->group(function () {
+Route::middleware(['auth', 'rate.limit:2fa'])->prefix('2fa')->name('2fa.')->group(function () {
     Route::get('/setup', [App\Http\Controllers\TwoFactorController::class, 'setup'])->name('setup');
     Route::post('/enable', [App\Http\Controllers\TwoFactorController::class, 'enable'])->name('enable');
     Route::get('/manage', [App\Http\Controllers\TwoFactorController::class, 'manage'])->name('manage');

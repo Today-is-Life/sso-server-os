@@ -11,7 +11,24 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // Register rate limiting middleware
+        $middleware->alias([
+            'rate.limit' => \App\Http\Middleware\RateLimitingMiddleware::class,
+        ]);
+
+        // Apply rate limiting to API routes
+        $middleware->api([
+            'rate.limit:api'
+        ]);
+
+        // Apply specific rate limiting to auth routes
+        $middleware->group('auth-rate-limit', [
+            'rate.limit:login'
+        ]);
+
+        $middleware->group('oauth-rate-limit', [
+            'rate.limit:oauth'
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

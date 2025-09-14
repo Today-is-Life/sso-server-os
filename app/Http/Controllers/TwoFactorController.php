@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Services\SiemService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -14,6 +15,12 @@ use Illuminate\Support\Facades\Validator;
 
 class TwoFactorController extends Controller
 {
+    protected SiemService $siemService;
+
+    public function __construct(SiemService $siemService)
+    {
+        $this->siemService = $siemService;
+    }
     /**
      * Show 2FA setup page
      */
@@ -75,6 +82,14 @@ class TwoFactorController extends Controller
             return back()->withErrors($error);
         }
 
+        // Log 2FA enabled
+        $this->siemService->logEvent(
+            SiemService::EVENT_2FA_ENABLED,
+            SiemService::LEVEL_INFO,
+            $user->id,
+            $request
+        );
+
         $recoveryCodes = $user->mfa_recovery_codes
             ? array_map(fn($code) => decrypt($code), $user->mfa_recovery_codes)
             : [];
@@ -133,6 +148,14 @@ class TwoFactorController extends Controller
         }
 
         $user->disable2FA();
+
+        // Log 2FA disabled
+        $this->siemService->logEvent(
+            SiemService::EVENT_2FA_DISABLED,
+            SiemService::LEVEL_WARNING,
+            $user->id,
+            $request
+        );
 
         if ($request->expectsJson()) {
             return response()->json([

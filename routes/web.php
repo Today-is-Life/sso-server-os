@@ -6,6 +6,7 @@ use App\Http\Controllers\SSO\OAuthController;
 use App\Http\Controllers\SSO\MagicLinkController;
 use App\Http\Controllers\SocialLoginController;
 use App\Http\Controllers\Admin\AdminController;
+use App\Http\Controllers\Admin\SecurityController;
 
 // Public routes
 Route::get('/', function () {
@@ -99,6 +100,10 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     // Permission Sync
     Route::post('/permissions/sync', [AdminController::class, 'syncDomainPermissions'])->name('permissions.sync');
     Route::post('/permissions/sync-all', [AdminController::class, 'syncAllPermissions'])->name('permissions.sync-all');
+
+    // Security Dashboard
+    Route::get('/security', [SecurityController::class, 'dashboard'])->name('security');
+    Route::get('/security/user-patterns/{userId}', [SecurityController::class, 'userPatterns'])->name('security.user-patterns');
 });
 
 // 2FA Routes
@@ -177,4 +182,9 @@ Route::middleware(['auth'])->prefix('api/admin')->name('api.admin.')->group(func
         $html .= '</tbody></table>';
         return $html;
     });
+
+    // Security API Routes
+    Route::get('/security/stats', [SecurityController::class, 'stats']);
+    Route::get('/security/events', [SecurityController::class, 'events']);
+    Route::get('/security/check-ip', [SecurityController::class, 'checkIp']);
 });

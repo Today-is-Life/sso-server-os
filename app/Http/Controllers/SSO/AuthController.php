@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Domain;
 use App\Services\SyncService;
+use App\Services\SiemService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -20,10 +21,12 @@ use Illuminate\Http\Response;
 class AuthController extends Controller
 {
     protected SyncService $syncService;
+    protected SiemService $siemService;
 
-    public function __construct(SyncService $syncService)
+    public function __construct(SyncService $syncService, SiemService $siemService)
     {
         $this->syncService = $syncService;
+        $this->siemService = $siemService;
     }
 
     /**
@@ -69,6 +72,15 @@ class AuthController extends Controller
         $user = User::where('email_hash', $emailHash)->first();
 
         if (!$user) {
+            // Log failed login attempt
+            $this->siemService->logEvent(
+                SiemService::EVENT_LOGIN_FAILURE,
+                SiemService::LEVEL_WARNING,
+                null,
+                $request,
+                ['email' => $request->email, 'reason' => 'user_not_found']
+            );
+
             return back()->withErrors(['email' => 'Diese Zugangsdaten stimmen nicht mit unseren Aufzeichnungen überein.'])->withInput();
         }
 
@@ -84,14 +96,33 @@ class AuthController extends Controller
             // Increment failed login attempts
             $failedAttempts = ($user->getAttribute('failed_login_attempts') ?? 0) + 1;
             $user->setAttribute('failed_login_attempts', $failedAttempts);
-            
+
+            // Log failed login attempt
+            $this->siemService->logEvent(
+                SiemService::EVENT_LOGIN_FAILURE,
+                SiemService::LEVEL_WARNING,
+                $user->id,
+                $request,
+                ['email' => $request->email, 'reason' => 'invalid_password', 'attempt_count' => $failedAttempts]
+            );
+
             // Lock account after 5 failed attempts
             if ($failedAttempts >= 5) {
                 $user->setAttribute('locked_until', now()->addMinutes(15));
                 $user->save();
+
+                // Log account lock
+                $this->siemService->logEvent(
+                    SiemService::EVENT_BRUTE_FORCE,
+                    SiemService::LEVEL_CRITICAL,
+                    $user->id,
+                    $request,
+                    ['locked_until' => $user->getAttribute('locked_until')->toISOString()]
+                );
+
                 return back()->withErrors(['email' => 'Zu viele fehlgeschlagene Anmeldeversuche. Konto für 15 Minuten gesperrt.'])->withInput();
             }
-            
+
             $user->save();
             return back()->withErrors(['email' => 'Diese Zugangsdaten stimmen nicht mit unseren Aufzeichnungen überein.'])->withInput();
         }
@@ -112,6 +143,15 @@ class AuthController extends Controller
 
         // Login successful
         $this->completeLogin($user, $request->boolean('remember'));
+
+        // Log successful login
+        $this->siemService->logEvent(
+            SiemService::EVENT_LOGIN_SUCCESS,
+            SiemService::LEVEL_INFO,
+            $user->id,
+            $request,
+            ['login_method' => 'password']
+        );
 
         // Check if user is superadmin
         $isSuperadmin = $user->groups()

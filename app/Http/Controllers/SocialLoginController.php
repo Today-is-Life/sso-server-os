@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use App\Models\SocialAccount;
+use App\Services\SiemService;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
@@ -14,6 +15,12 @@ use Illuminate\Support\Str;
 
 class SocialLoginController extends Controller
 {
+    protected SiemService $siemService;
+
+    public function __construct(SiemService $siemService)
+    {
+        $this->siemService = $siemService;
+    }
     /**
      * Supported social providers
      */
@@ -85,6 +92,19 @@ class SocialLoginController extends Controller
         Auth::login($user);
         $user->recordSuccessfulLogin($request->ip());
 
+        // Log social login
+        $this->siemService->logEvent(
+            SiemService::EVENT_SOCIAL_LOGIN,
+            SiemService::LEVEL_INFO,
+            $user->id,
+            $request,
+            [
+                'provider' => $provider,
+                'social_id' => $socialUser->getId(),
+                'social_email' => $socialUser->getEmail()
+            ]
+        );
+
         Log::info("User logged in via {$provider}", [
             'user_id' => $user->id,
             'provider' => $provider,
@@ -136,6 +156,19 @@ class SocialLoginController extends Controller
             $user->setAttribute('timezone', 'Europe/Berlin');
             $user->password = bcrypt(Str::random(32)); // Random password, user can reset if needed
             $user->save();
+
+            // Log account creation
+            $this->siemService->logEvent(
+                SiemService::EVENT_ACCOUNT_CREATED,
+                SiemService::LEVEL_INFO,
+                $user->id,
+                request(),
+                [
+                    'provider' => $provider,
+                    'social_id' => $socialUser->getId(),
+                    'creation_method' => 'social_login'
+                ]
+            );
 
             Log::info("New user created via social login", [
                 'user_id' => $user->id,

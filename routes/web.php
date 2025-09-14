@@ -32,6 +32,9 @@ Route::prefix('auth')->name('sso.')->group(function () {
     Route::get('/register', [AuthController::class, 'showRegistrationForm'])->name('register');
     Route::post('/register', [AuthController::class, 'register'])->name('register.post');
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+
+    // Email Verification
+    Route::get('/verify-email/{token}', [AuthController::class, 'verifyEmail'])->name('verify-email');
     
     // MFA
     Route::get('/mfa', [AuthController::class, 'showMfaForm'])->name('mfa');

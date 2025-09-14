@@ -305,15 +305,129 @@ class AuthController extends Controller
     protected function sendVerificationEmail(User $user): void
     {
         $token = Str::random(60);
-        
+
         DB::table('password_reset_tokens')->insert([
             'email' => $user->email_hash,
             'token' => Hash::make($token),
             'created_at' => now(),
         ]);
 
-        // TODO: Send actual email
-        Log::info('Verification email would be sent to: ' . $user->email);
+        // Generate verification URL
+        $verificationUrl = url('/auth/verify-email/' . urlencode($token) . '?email=' . urlencode($user->email_hash));
+
+        // Send actual email
+        try {
+            \Illuminate\Support\Facades\Mail::to($user->email)
+                ->send(new \App\Mail\VerifyEmail($user, $verificationUrl));
+
+            Log::info('Verification email sent to user: ' . $user->id);
+        } catch (\Exception $e) {
+            Log::error('Failed to send verification email: ' . $e->getMessage());
+            // In production, you might want to throw this error or handle it appropriately
+        }
+    }
+
+    /**
+     * Verify email address
+     */
+    public function verifyEmail(Request $request, string $token): RedirectResponse
+    {
+        $emailHash = $request->get('email');
+
+        if (!$emailHash) {
+            return redirect()->route('sso.login')
+                ->withErrors(['email' => 'Ungültiger Verifikationslink.']);
+        }
+
+        // Find the verification token
+        $verificationToken = DB::table('password_reset_tokens')
+            ->where('email', $emailHash)
+            ->where('created_at', '>', now()->subHours(24)) // Token valid for 24 hours
+            ->first();
+
+        if (!$verificationToken || !Hash::check($token, $verificationToken->token)) {
+            return redirect()->route('sso.login')
+                ->withErrors(['email' => 'Der Verifikationslink ist ungültig oder abgelaufen.']);
+        }
+
+        // Find user and verify email
+        $user = User::where('email_hash', $emailHash)->first();
+
+        if (!$user) {
+            return redirect()->route('sso.login')
+                ->withErrors(['email' => 'Benutzer nicht gefunden.']);
+        }
+
+        // Mark email as verified
+        $user->email_verified_at = now();
+        $user->save();
+
+        // Delete verification token
+        DB::table('password_reset_tokens')
+            ->where('email', $emailHash)
+            ->delete();
+
+        Log::info('Email verified for user: ' . $user->id);
+
+        return redirect()->route('sso.login')
+            ->with('success', 'E-Mail-Adresse erfolgreich bestätigt! Sie können sich jetzt anmelden.');
+    }
+
+    /**
+     * Show MFA form
+     */
+    public function showMfaForm(): View
+    {
+        if (!session('mfa_user_id')) {
+            return redirect()->route('sso.login');
+        }
+
+        return view('sso.mfa');
+    }
+
+    /**
+     * Verify MFA token
+     */
+    public function verifyMfa(Request $request): RedirectResponse
+    {
+        $userId = session('mfa_user_id');
+
+        if (!$userId) {
+            return redirect()->route('sso.login');
+        }
+
+        $validator = Validator::make($request->all(), [
+            'token' => 'required|string',
+        ]);
+
+        if ($validator->fails()) {
+            return back()->withErrors($validator);
+        }
+
+        $user = User::find($userId);
+
+        if (!$user) {
+            return redirect()->route('sso.login');
+        }
+
+        // Verify MFA token
+        if (!$user->verify2FAToken($request->token)) {
+            return back()->withErrors(['token' => 'Ungültiger MFA-Code.']);
+        }
+
+        // Complete login process
+        $originalRequest = session('mfa_redirect', []);
+        $this->completeLogin($user, false);
+
+        // Clear MFA session data
+        session()->forget(['mfa_user_id', 'mfa_redirect']);
+
+        // Handle OAuth redirect if needed
+        if (isset($originalRequest['client_id'])) {
+            return $this->handleOAuthRedirect($user, new Request($originalRequest));
+        }
+
+        return redirect()->intended('/admin');
     }
 
     /**

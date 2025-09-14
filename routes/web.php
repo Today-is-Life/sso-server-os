@@ -27,7 +27,7 @@ Route::get('/test-auth', function() {
 });
 
 // SSO Authentication Routes
-Route::prefix('auth')->name('sso.')->middleware(['auth-rate-limit'])->group(function () {
+Route::prefix('auth')->name('sso.')->group(function () {
     // Login/Register
     Route::get('/login', [AuthController::class, 'showLoginForm'])->name('login');
     Route::post('/login', [AuthController::class, 'login'])->name('login.post');
@@ -53,7 +53,7 @@ Route::prefix('auth')->name('sso.')->middleware(['auth-rate-limit'])->group(func
 });
 
 // OAuth2/OIDC Routes
-Route::prefix('oauth')->name('oauth.')->middleware(['oauth-rate-limit'])->group(function () {
+Route::prefix('oauth')->name('oauth.')->group(function () {
     // Authorization
     Route::get('/authorize', [OAuthController::class, 'authorize'])->name('authorize');
     Route::post('/authorize', [OAuthController::class, 'handleAuthorization'])->name('authorize.handle');

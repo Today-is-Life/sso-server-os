@@ -271,7 +271,8 @@ class AuthController extends Controller
     public function register(Request $request): RedirectResponse
     {
         $validator = Validator::make($request->all(), [
-            'name' => 'required|string|max:255',
+            'first_name' => 'required|string|max:255',
+            'last_name' => 'required|string|max:255',
             'email' => 'required|email|max:255',
             'password' => 'required|string|min:8|confirmed',
             'terms' => 'required|accepted',
@@ -312,7 +313,7 @@ class AuthController extends Controller
         // Create user
         $user = new User();
         $user->id = (string) Str::uuid();
-        $user->name = $request->name;
+        $user->name = $request->first_name . ' ' . $request->last_name;
         $user->email = $request->email; // Will be encrypted by mutator
         $user->setAttribute('email_hash', $emailHash);
         $user->password = Hash::make($request->password);
@@ -331,6 +332,16 @@ class AuthController extends Controller
                 'is_primary' => true,
             ]);
         }
+
+        // TODO: Re-enable SIEM logging after fixing DI issues
+        // Log account creation
+        // $this->siemService->logEvent(
+        //     SiemService::EVENT_ACCOUNT_CREATED,
+        //     SiemService::LEVEL_INFO,
+        //     $user->id,
+        //     $request,
+        //     ['creation_method' => 'email_registration']
+        // );
 
         // Send verification email
         $this->sendVerificationEmail($user);

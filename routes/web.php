@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\SSO\AuthController;
 use App\Http\Controllers\SSO\OAuthController;
 use App\Http\Controllers\SSO\MagicLinkController;
+use App\Http\Controllers\SocialLoginController;
 use App\Http\Controllers\Admin\AdminController;
 
 // Public routes
@@ -44,6 +45,10 @@ Route::prefix('auth')->name('sso.')->group(function () {
     Route::get('/magic', [MagicLinkController::class, 'showRequestForm'])->name('magic');
     Route::post('/magic', [MagicLinkController::class, 'sendMagicLink'])->name('magic.send');
     Route::get('/magic/verify/{token}', [MagicLinkController::class, 'verify'])->name('magic.verify');
+
+    // Social Login
+    Route::get('/social/{provider}', [SocialLoginController::class, 'redirect'])->name('social');
+    Route::get('/social/{provider}/callback', [SocialLoginController::class, 'callback'])->name('social.callback');
 });
 
 // OAuth2/OIDC Routes
@@ -94,6 +99,16 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     // Permission Sync
     Route::post('/permissions/sync', [AdminController::class, 'syncDomainPermissions'])->name('permissions.sync');
     Route::post('/permissions/sync-all', [AdminController::class, 'syncAllPermissions'])->name('permissions.sync-all');
+});
+
+// 2FA Routes
+Route::middleware(['auth'])->prefix('2fa')->name('2fa.')->group(function () {
+    Route::get('/setup', [App\Http\Controllers\TwoFactorController::class, 'setup'])->name('setup');
+    Route::post('/enable', [App\Http\Controllers\TwoFactorController::class, 'enable'])->name('enable');
+    Route::get('/manage', [App\Http\Controllers\TwoFactorController::class, 'manage'])->name('manage');
+    Route::post('/disable', [App\Http\Controllers\TwoFactorController::class, 'disable'])->name('disable');
+    Route::post('/regenerate-recovery', [App\Http\Controllers\TwoFactorController::class, 'regenerateRecoveryCodes'])->name('regenerate-recovery');
+    Route::get('/recovery-codes', [App\Http\Controllers\TwoFactorController::class, 'showRecoveryCodes'])->name('recovery-codes');
 });
 
 // API Routes

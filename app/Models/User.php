@@ -330,12 +330,48 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     public function generate2FASecret(): string
     {
-        // TODO: Implement 2FA with proper package
-        $secret = bin2hex(random_bytes(16));
+        $totp = \OTPHP\TOTP::create();
+        $secret = $totp->getSecret();
+
         $this->mfa_secret = $secret;
         $this->save();
-        
+
         return $secret;
+    }
+
+    /**
+     * Get 2FA QR Code URL for setup
+     */
+    public function get2FAQRCodeUrl(): ?string
+    {
+        if (!$this->mfa_secret) {
+            return null;
+        }
+
+        $totp = \OTPHP\TOTP::create($this->mfa_secret);
+        $totp->setLabel($this->email);
+        $totp->setIssuer('SSO Server - Today is Life');
+
+        return $totp->getQrCodeUri(
+            'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=',
+            urlencode($totp->getProvisioningUri())
+        );
+    }
+
+    /**
+     * Get 2FA provisioning URI for manual setup
+     */
+    public function get2FAProvisioningUri(): ?string
+    {
+        if (!$this->mfa_secret) {
+            return null;
+        }
+
+        $totp = \OTPHP\TOTP::create($this->mfa_secret);
+        $totp->setLabel($this->email);
+        $totp->setIssuer('SSO Server - Today is Life');
+
+        return $totp->getProvisioningUri();
     }
 
     /**
@@ -346,9 +382,56 @@ class User extends Authenticatable implements MustVerifyEmail
         if (!$this->mfa_enabled || !$this->mfa_secret) {
             return false;
         }
-        
-        // TODO: Implement proper 2FA verification
-        return false;
+
+        try {
+            $totp = \OTPHP\TOTP::create($this->mfa_secret);
+            $totp->setLabel($this->email);
+            $totp->setIssuer('SSO Server - Today is Life');
+
+            // Verify token with a window of 2 periods (60 seconds total) to account for clock drift
+            return $totp->verify($token, null, 2);
+        } catch (\Exception $e) {
+            Log::error('2FA token verification failed: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Enable 2FA for user
+     */
+    public function enable2FA(string $verificationToken): bool
+    {
+        if (!$this->mfa_secret) {
+            return false;
+        }
+
+        // Verify the setup token before enabling
+        if (!$this->verify2FAToken($verificationToken)) {
+            return false;
+        }
+
+        $this->mfa_enabled = true;
+        $this->save();
+
+        // Generate recovery codes
+        $this->generateRecoveryCodes();
+
+        Log::info('2FA enabled for user: ' . $this->id);
+        return true;
+    }
+
+    /**
+     * Disable 2FA for user
+     */
+    public function disable2FA(): bool
+    {
+        $this->mfa_enabled = false;
+        $this->mfa_secret = null;
+        $this->mfa_recovery_codes = null;
+        $this->save();
+
+        Log::info('2FA disabled for user: ' . $this->id);
+        return true;
     }
 
     /**

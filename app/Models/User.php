@@ -405,8 +405,17 @@ class User extends Authenticatable implements MustVerifyEmail
             return false;
         }
 
-        // Verify the setup token before enabling
-        if (!$this->verify2FAToken($verificationToken)) {
+        // Verify the setup token before enabling (special verification for setup)
+        try {
+            $totp = \OTPHP\TOTP::create($this->mfa_secret);
+            $totp->setLabel($this->email);
+            $totp->setIssuer('SSO Server - Today is Life');
+            // Verify token with a window of 2 periods (60 seconds total) to account for clock drift
+            if (!$totp->verify($verificationToken, null, 2)) {
+                return false;
+            }
+        } catch (\Exception $e) {
+            Log::error('2FA setup token verification failed: ' . $e->getMessage());
             return false;
         }
 

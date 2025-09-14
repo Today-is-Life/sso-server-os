@@ -63,11 +63,12 @@ class MagicLinkController extends Controller
         // Store magic link in database
         DB::table('magic_links')->insert([
             'id' => Str::uuid(),
-            'user_id' => $user->id,
-            'token' => $hashedToken,
+            'email' => $user->email,
+            'email_hash' => $user->email_hash,
+            'token_hash' => $hashedToken,
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),
-            'redirect_url' => $request->redirect_uri,
+            'redirect_to' => $request->redirect_uri,
             'metadata' => json_encode([
                 'client_id' => $request->client_id,
                 'state' => $request->state,
@@ -108,7 +109,7 @@ class MagicLinkController extends Controller
 
         // Find and validate magic link
         $magicLink = DB::table('magic_links')
-            ->where('token', $hashedToken)
+            ->where('token_hash', $hashedToken)
             ->where('expires_at', '>', now())
             ->whereNull('used_at')
             ->first();
@@ -123,12 +124,12 @@ class MagicLinkController extends Controller
             Log::warning('Magic link used from different IP', [
                 'original_ip' => $magicLink->ip_address,
                 'current_ip' => $request->ip(),
-                'user_id' => $magicLink->user_id
+                'email_hash' => $magicLink->email_hash
             ]);
         }
 
         // Find user
-        $user = User::find($magicLink->user_id);
+        $user = User::where('email_hash', $magicLink->email_hash)->first();
 
         if (!$user) {
             return redirect()->route('sso.login')

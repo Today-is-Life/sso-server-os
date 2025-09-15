@@ -1,0 +1,30 @@
+# Dependencies
+/vendor/
+composer.lock
+
+# IDE
+/.idea/
+/.vscode/
+*.swp
+*.swo
+
+# Testing
+/coverage/
+coverage.html
+coverage.xml
+coverage.txt
+.phpunit.result.cache
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Cache
+.php-cs-fixer.cache
+
+# Local configuration
+.env
+.env.local
